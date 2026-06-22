@@ -1,0 +1,92 @@
+name: build-openresty-macos-arm64
+
+on:
+  workflow_dispatch:
+
+env:
+  OPENRESTY_VERSION: 1.25.3.2
+  OPENSSL_VERSION: 3.0.16
+  PCRE_VERSION: 8.45
+  ZLIB_VERSION: 1.3.1
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show build machine
+        run: |
+          uname -a
+          uname -m
+          sw_vers
+          clang --version
+
+      - name: Download sources
+        run: |
+          mkdir -p build-src
+          cd build-src
+
+          curl -fL -o openresty-${OPENRESTY_VERSION}.tar.gz \
+            https://openresty.org/download/openresty-${OPENRESTY_VERSION}.tar.gz
+
+          curl -fL -o openssl-${OPENSSL_VERSION}.tar.gz \
+            https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz
+
+          curl -fL -o pcre-${PCRE_VERSION}.tar.gz \
+            https://downloads.sourceforge.net/project/pcre/pcre/${PCRE_VERSION}/pcre-${PCRE_VERSION}.tar.gz
+
+          curl -fL -o zlib-${ZLIB_VERSION}.tar.gz \
+            https://zlib.net/fossils/zlib-${ZLIB_VERSION}.tar.gz
+
+          tar xzf openresty-${OPENRESTY_VERSION}.tar.gz
+          tar xzf openssl-${OPENSSL_VERSION}.tar.gz
+          tar xzf pcre-${PCRE_VERSION}.tar.gz
+          tar xzf zlib-${ZLIB_VERSION}.tar.gz
+
+      - name: Build OpenResty
+        run: |
+          export MACOSX_DEPLOYMENT_TARGET=11.0
+
+          cd build-src/openresty-${OPENRESTY_VERSION}
+
+          ./configure \
+            --prefix="$PWD/../../dist/openresty" \
+            --with-http_ssl_module \
+            --with-http_v2_module \
+            --with-http_realip_module \
+            --with-http_stub_status_module \
+            --with-http_gzip_static_module \
+            --with-http_sub_module \
+            --with-http_auth_request_module \
+            --with-stream \
+            --with-stream_ssl_module \
+            --with-stream_ssl_preread_module \
+            --with-threads \
+            --with-pcre=../pcre-${PCRE_VERSION} \
+            --with-pcre-jit \
+            --with-zlib=../zlib-${ZLIB_VERSION} \
+            --with-openssl=../openssl-${OPENSSL_VERSION} \
+            --with-openssl-opt="no-shared no-tests"
+
+          make -j"$(sysctl -n hw.ncpu)"
+          make install
+
+      - name: Verify binary
+        run: |
+          file dist/openresty/nginx/sbin/nginx
+          lipo -info dist/openresty/nginx/sbin/nginx || true
+          dist/openresty/nginx/sbin/nginx -V
+
+      - name: Package
+        run: |
+          cd dist
+          tar czf openresty-${OPENRESTY_VERSION}-macos-arm64.tar.gz openresty
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openresty-${{ env.OPENRESTY_VERSION }}-macos-arm64
+          path: dist/openresty-${{ env.OPENRESTY_VERSION }}-macos-arm64.tar.gz
